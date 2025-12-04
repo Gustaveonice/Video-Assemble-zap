@@ -1,50 +1,61 @@
-from flask import Flask, jsonify
+from flask import Flask, request, jsonify
 from moviepy.editor import *
 import os
+import datetime
 
 app = Flask(__name__)
 
-@app.route("/")
-def hello():
-    return "🚀 Zap Insolite API est en ligne !"
+@app.route("/", methods=["GET"])
+def home():
+    return "🚀 Zap Insolite API est active !"
 
-@app.route("/assemble")
+@app.route("/assemble", methods=["POST"])
 def assemble_video():
     try:
-        # Assure-toi que ces fichiers existent dans le dossier assets/
-        image = "assets/image.jpg"
-        voice = "assets/voice.mp3"
-        music = "assets/music.mp3"  # facultatif
+        files = request.files
+        required_files = ['voice', 'music'] + [f'image{i}' for i in range(1, 6)]
 
-        # Clip vidéo à partir d'une image fixe (5s)
-        clip = ImageClip(image, duration=5)
+        for name in required_files:
+            if name not in files:
+                return jsonify({"error": f"Missing file: {name}"}), 400
 
-        # Audio principal : voix off
-        voice_clip = AudioFileClip(voice)
-
-        # Facultatif : musique de fond
-        if os.path.exists(music):
-            music_clip = AudioFileClip(music).volumex(0.2)
-            final_audio = CompositeAudioClip([voice_clip, music_clip])
-        else:
-            final_audio = voice_clip
-
-        # Appliquer l'audio au clip
-        clip = clip.set_audio(final_audio)
-
-        # Sous-titres simples (affichés sur la vidéo)
-        subtitles = TextClip("Saviez-vous que les pieuvres ont 3 cœurs ?", fontsize=40, color='white', font='Arial')
-        subtitles = subtitles.set_position(("center", "bottom")).set_duration(5)
-
-        # Vidéo finale avec image + texte + audio
-        final = CompositeVideoClip([clip, subtitles])
-
-        # Crée le dossier de sortie si pas présent
+        # Créer le dossier output s'il n'existe pas
         os.makedirs("output", exist_ok=True)
-        final.write_videofile("output/video.mp4", fps=24)
 
-        return jsonify({"status": "✅ Vidéo générée", "path": "/output/video.mp4"})
-    
+        # Sauvegarder tous les fichiers
+        voice_path = "voice.mp3"
+        music_path = "music.mp3"
+        image_paths = []
+
+        files['voice'].save(voice_path)
+        files['music'].save(music_path)
+
+        for i in range(1, 6):
+            img_path = f"image{i}.jpg"
+            files[f'image{i}'].save(img_path)
+            image_paths.append(img_path)
+
+        # Création des clips image
+        clips = [ImageClip(img).set_duration(2) for img in image_paths]
+        video = concatenate_videoclips(clips, method="compose")
+
+        # Ajouter la voix
+        voice = AudioFileClip(voice_path)
+        music = AudioFileClip(music_path).volumex(0.2)
+
+        # Mix audio
+        final_audio = CompositeAudioClip([music, voice])
+        final_audio = final_audio.set_duration(video.duration)
+
+        video = video.set_audio(final_audio)
+
+        # Nom unique pour la vidéo
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = f"output/video_{timestamp}.mp4"
+        video.write_videofile(output_path, fps=24)
+
+        return jsonify({"status": "success", "video_path": output_path})
+
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
