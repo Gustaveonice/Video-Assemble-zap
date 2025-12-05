@@ -1,64 +1,84 @@
 from flask import Flask, request, jsonify
-from moviepy.editor import *
+from threading import Thread
 import os
-import datetime
+import time
+import requests
+import uuid
+from moviepy.editor import *
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = Flask(__name__)
 
-@app.route("/", methods=["GET"])
-def home():
-    return "🚀 Zap Insolite API est active !"
+DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")  # à définir dans ton .env
 
-@app.route("/assemble", methods=["POST"])
-def assemble_video():
+def send_discord_message(content):
     try:
-        files = request.files
-        required_files = ['voice', 'music'] + [f'image{i}' for i in range(1, 6)]
+        requests.post(DISCORD_WEBHOOK, json={"content": content})
+    except:
+        pass
 
-        for name in required_files:
-            if name not in files:
-                return jsonify({"error": f"Missing file: {name}"}), 400
+def generate_video(job_id, images, voice_path, music_path, subtitle_text):
+    try:
+        send_discord_message(f"🎬 Job {job_id} : création vidéo en cours...")
 
-        # Créer le dossier output s'il n'existe pas
-        os.makedirs("output", exist_ok=True)
-
-        # Sauvegarder tous les fichiers
-        voice_path = "voice.mp3"
-        music_path = "music.mp3"
-        image_paths = []
-
-        files['voice'].save(voice_path)
-        files['music'].save(music_path)
-
-        for i in range(1, 6):
-            img_path = f"image{i}.jpg"
-            files[f'image{i}'].save(img_path)
-            image_paths.append(img_path)
-
-        # Création des clips image
-        clips = [ImageClip(img).set_duration(2) for img in image_paths]
+        clips = [ImageClip(img).set_duration(2) for img in images]
         video = concatenate_videoclips(clips, method="compose")
 
-        # Ajouter la voix
-        voice = AudioFileClip(voice_path)
-        music = AudioFileClip(music_path).volumex(0.2)
+        audio_voice = AudioFileClip(voice_path)
+        audio_music = AudioFileClip(music_path).volumex(0.3)
+        audio_final = CompositeAudioClip([audio_voice, audio_music])
 
-        # Mix audio
-        final_audio = CompositeAudioClip([music, voice])
-        final_audio = final_audio.set_duration(video.duration)
+        video = video.set_audio(audio_final)
+        video = video.set_duration(audio_voice.duration)
 
-        video = video.set_audio(final_audio)
-
-        # Nom unique pour la vidéo
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = f"output/video_{timestamp}.mp4"
+        filename = f"{job_id}.mp4"
+        output_path = os.path.join("videos", filename)
+        os.makedirs("videos", exist_ok=True)
         video.write_videofile(output_path, fps=24)
 
-        return jsonify({"status": "success", "video_path": output_path})
+        send_discord_message(f"✅ Job {job_id} terminé ! Vidéo générée.")
+        send_discord_message(f"📹 Lien Dropbox (à uploader manuellement ou automatiquement) : `{filename}`")
 
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        send_discord_message(f"❌ Job {job_id} a échoué : {str(e)}")
+
+@app.route("/start-job", methods=["POST"])
+def start_job():
+    job_id = str(uuid.uuid4())
+
+    files = request.files
+    subtitle_text = request.form.get("subtitle")
+
+    if not files or not subtitle_text:
+        return jsonify({"error": "Fichiers ou sous-titres manquants"}), 400
+
+    images = []
+    for i in range(5):
+        img = files.get(f"image{i+1}")
+        if img:
+            path = f"temp/{job_id}_img{i+1}.jpg"
+            os.makedirs("temp", exist_ok=True)
+            img.save(path)
+            images.append(path)
+
+    voice = files.get("voice")
+    music = files.get("music")
+
+    voice_path = f"temp/{job_id}_voice.mp3"
+    music_path = f"temp/{job_id}_music.mp3"
+    voice.save(voice_path)
+    music.save(music_path)
+
+    thread = Thread(target=generate_video, args=(job_id, images, voice_path, music_path, subtitle_text))
+    thread.start()
+
+    return jsonify({"job_id": job_id, "status": "processing"}), 200
+
+@app.route("/", methods=["GET"])
+def health():
+    return "🚀 Zap Insolite Server is online!"
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
