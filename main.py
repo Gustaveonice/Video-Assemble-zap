@@ -11,7 +11,7 @@ load_dotenv()
 
 app = Flask(__name__)
 
-DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK")  # à définir dans ton .env
+DISCORD_WEBHOOK = os.getenv("https://discord.com/api/webhooks/1446531572273643756/DAYNozqSyHlSXpXG-309gOMlnsyBKAKjrBJOzJzTM05bqBwvHQbqvBJfEm99Azodik9D")  # à définir dans ton .env
 
 def send_discord_message(content):
     try:
