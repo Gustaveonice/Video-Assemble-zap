@@ -6,3 +6,4 @@ imageio-ffmpeg==0.4.8
 numpy==1.26.2
 requests
 python-dotenv
+setuptools
